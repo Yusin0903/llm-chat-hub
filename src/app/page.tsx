@@ -136,8 +136,9 @@ export default function Home() {
       const decoder = new TextDecoder();
       let buffer = "";
       let assistantText = "";
+      let streamDone = false;
 
-      while (true) {
+      while (!streamDone) {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
@@ -149,7 +150,13 @@ export default function Home() {
           const trimmed = line.trim();
           if (!trimmed.startsWith("data:")) continue;
           const payload = trimmed.slice(5).trim();
-          if (payload === "[DONE]") continue;
+          if (payload === "[DONE]") {
+            // Some upstreams keep the connection open after the final chunk,
+            // so we must stop on this marker rather than wait for the reader
+            // to report done — otherwise the stream read hangs forever.
+            streamDone = true;
+            break;
+          }
 
           try {
             const json = JSON.parse(payload);
@@ -166,6 +173,10 @@ export default function Home() {
             // skip malformed chunk
           }
         }
+      }
+
+      if (streamDone) {
+        reader.cancel().catch(() => {});
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Something went wrong";
