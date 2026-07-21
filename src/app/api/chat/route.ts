@@ -1,4 +1,4 @@
-import { NIM_BASE_URL, getNimApiKey } from "@/lib/nim";
+import { getApiBaseUrl, getApiKey } from "@/lib/api";
 
 interface ChatMessage {
   role: "system" | "user" | "assistant";
@@ -8,7 +8,7 @@ interface ChatMessage {
 export async function POST(request: Request) {
   let apiKey: string;
   try {
-    apiKey = getNimApiKey();
+    apiKey = getApiKey();
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return Response.json({ error: message }, { status: 500 });
@@ -24,7 +24,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const upstream = await fetch(`${NIM_BASE_URL}/chat/completions`, {
+  const upstream = await fetch(`${getApiBaseUrl()}/chat/completions`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -41,7 +41,7 @@ export async function POST(request: Request) {
   if (!upstream.ok || !upstream.body) {
     const text = await upstream.text();
     return Response.json(
-      { error: `NIM API error ${upstream.status}: ${text}` },
+      { error: `API error ${upstream.status}: ${text}` },
       { status: upstream.status || 500 }
     );
   }

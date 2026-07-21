@@ -7,7 +7,7 @@ interface ChatMessage {
   content: string;
 }
 
-interface NimModel {
+interface ApiModel {
   id: string;
   owned_by?: string;
 }
@@ -16,7 +16,7 @@ const STORAGE_KEY = "llm-chat-hub:v1";
 const PREFERRED_DEFAULT = "meta/llama-4-maverick-17b-128e-instruct";
 
 export default function Home() {
-  const [models, setModels] = useState<NimModel[]>([]);
+  const [models, setModels] = useState<ApiModel[]>([]);
   const [modelsError, setModelsError] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState<string>("");
   const [modelQuery, setModelQuery] = useState("");
@@ -25,9 +25,26 @@ export default function Home() {
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [theme, setTheme] = useState<"light" | "dark">("light");
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Sync theme state with the class the inline layout script already applied,
+  // so the toggle button reflects the actual (pre-hydration) theme.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setTheme(document.documentElement.classList.contains("dark") ? "dark" : "light");
+  }, []);
+
+  function toggleTheme() {
+    setTheme((prev) => {
+      const next = prev === "dark" ? "light" : "dark";
+      document.documentElement.classList.toggle("dark", next === "dark");
+      localStorage.setItem("theme", next);
+      return next;
+    });
+  }
 
   // Load persisted conversation + model on mount.
   // localStorage is only available client-side, so this must run in an effect
@@ -58,7 +75,7 @@ export default function Home() {
         setModels(data.models);
         setSelectedModel((prev) => {
           if (prev) return prev;
-          const preferred = data.models.find((m: NimModel) => m.id === PREFERRED_DEFAULT);
+          const preferred = data.models.find((m: ApiModel) => m.id === PREFERRED_DEFAULT);
           return preferred ? preferred.id : data.models[0]?.id ?? "";
         });
       })
@@ -206,8 +223,14 @@ export default function Home() {
         </div>
         {modelsError && <span className="text-sm text-red-500">{modelsError}</span>}
         <button
-          onClick={newChat}
+          onClick={toggleTheme}
           className="ml-auto rounded-md border border-neutral-300 px-3 py-2 text-sm hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
+        >
+          {theme === "dark" ? "Light mode" : "Dark mode"}
+        </button>
+        <button
+          onClick={newChat}
+          className="rounded-md border border-neutral-300 px-3 py-2 text-sm hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
         >
           New chat
         </button>
