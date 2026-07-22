@@ -136,37 +136,85 @@ export default function Home() {
       const decoder = new TextDecoder();
       let buffer = "";
       let assistantText = "";
+      let pending = ""; // received but not yet revealed to the UI
+      let streamDone = false;
+      let networkDone = false;
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-
-        const lines = buffer.split("\n\n");
-        buffer = lines.pop() ?? "";
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed.startsWith("data:")) continue;
-          const payload = trimmed.slice(5).trim();
-          if (payload === "[DONE]") continue;
-
-          try {
-            const json = JSON.parse(payload);
-            const delta = json.choices?.[0]?.delta?.content;
-            if (delta) {
-              assistantText += delta;
-              setMessages((prev) => {
-                const copy = [...prev];
-                copy[copy.length - 1] = { role: "assistant", content: assistantText };
-                return copy;
-              });
-            }
-          } catch {
-            // skip malformed chunk
-          }
+      // Network chunks arrive in bursts of uneven size/timing, which reads as
+      // stuttering if we render every chunk as-is. Instead we drip the
+      // received text into the UI at a steady per-frame pace (speeding up
+      // to catch up if a big burst arrives), so it reads like smooth typing.
+      function revealTick() {
+        if (pending.length > 0) {
+          const revealCount = Math.max(2, Math.ceil(pending.length * 0.15));
+          assistantText += pending.slice(0, revealCount);
+          pending = pending.slice(revealCount);
+          setMessages((prev) => {
+            const copy = [...prev];
+            copy[copy.length - 1] = { role: "assistant", content: assistantText };
+            return copy;
+          });
+        }
+        if (pending.length > 0 || !networkDone) {
+          requestAnimationFrame(revealTick);
         }
       }
+      requestAnimationFrame(revealTick);
+
+      try {
+        while (!streamDone) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          const lines = buffer.split("\n\n");
+          buffer = lines.pop() ?? "";
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith("data:")) continue;
+            const payload = trimmed.slice(5).trim();
+            if (payload === "[DONE]") {
+              // Some upstreams keep the connection open after the final chunk,
+              // so we must stop on this marker rather than wait for the reader
+              // to report done — otherwise the stream read hangs forever.
+              streamDone = true;
+              break;
+            }
+
+            try {
+              const json = JSON.parse(payload);
+              const delta = json.choices?.[0]?.delta?.content;
+              if (delta) pending += delta;
+            } catch {
+              // skip malformed chunk
+            }
+          }
+        }
+
+        if (streamDone) {
+          reader.cancel().catch(() => {});
+        }
+        networkDone = true;
+      } catch (readErr) {
+        // Drop any buffered-but-unrevealed text so the reveal loop's next
+        // (already-scheduled) tick is a no-op instead of writing assistant
+        // text into whatever message ends up last after the outer catch
+        // below removes this one.
+        pending = "";
+        networkDone = true;
+        throw readErr;
+      }
+
+      // Keep Send disabled until the reveal animation has drained the
+      // remaining buffered text, so the UI doesn't accept new input mid-type.
+      await new Promise<void>((resolve) => {
+        function check() {
+          if (pending.length === 0) resolve();
+          else requestAnimationFrame(check);
+        }
+        check();
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Something went wrong";
       setError(message);

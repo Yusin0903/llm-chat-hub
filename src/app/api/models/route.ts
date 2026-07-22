@@ -1,4 +1,5 @@
 import { getApiBaseUrl, getApiKey } from "@/lib/api";
+import { pickCuratedModels } from "@/lib/curatedModels";
 
 interface ApiModel {
   id: string;
@@ -29,9 +30,15 @@ export async function GET() {
     }
 
     const data = await res.json();
-    const models: ApiModel[] = (data.data ?? [])
+    const allModels: ApiModel[] = (data.data ?? [])
       .map((m: ApiModel) => ({ id: m.id, object: m.object, owned_by: m.owned_by }))
       .sort((a: ApiModel, b: ApiModel) => a.id.localeCompare(b.id));
+
+    // Show a curated top pick by default; fall back to the full list if none
+    // of the curated patterns match (e.g. API_BASE_URL points at a different
+    // provider than NVIDIA NIM).
+    const curated = pickCuratedModels(allModels);
+    const models = curated.length > 0 ? curated : allModels;
 
     cache = { models, fetchedAt: Date.now() };
     return Response.json({ models });
